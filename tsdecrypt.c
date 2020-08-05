@@ -970,7 +970,7 @@ void signal_alarm(int sig) {
 	raise(SIGINT);
 }
 
-#define RTP_HDR_SZ  12
+#define RTP_HDR_SZ  32
 
 static uint8_t ts_packet[FRAME_SIZE + RTP_HDR_SZ];
 static uint8_t rtp_hdr[2][RTP_HDR_SZ];
@@ -1055,7 +1055,7 @@ int main(int argc, char **argv) {
 			if (!ts.rtp_input) {
 				readen = fdread_ex(ts.input.fd, (char *)ts_packet, FRAME_SIZE, 250, 4, 1);
 			} else {
-				readen = fdread_ex(ts.input.fd, (char *)ts_packet, FRAME_SIZE + RTP_HDR_SZ, 250, 4, 1);
+				readen = fdread_ex(ts.input.fd, (char *)ts_packet, FRAME_SIZE + RTP_HDR_SZ, 250, 4, 0);
 				if (readen > RTP_HDR_SZ) {
 					memcpy(rtp_hdr[rtp_hdr_pos], ts_packet, RTP_HDR_SZ);
 					memmove(ts_packet, ts_packet + RTP_HDR_SZ, FRAME_SIZE);
