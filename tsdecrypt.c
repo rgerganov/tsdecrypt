@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <syslog.h>
 #include <sys/resource.h>
+#include <openssl/aes.h>
 
 #include "libfuncs/libfuncs.h"
 
@@ -51,6 +52,8 @@ static int packet_buflen;
 static uint8_t packet_buf[256];
 static enum msg_type packet_type = ECM_MSG;
 
+AES_KEY aes_key;
+
 extern int ai_family;
 
 static void do_log(FILE *f, time_t now, const char *msg) {
@@ -77,7 +80,7 @@ static void LOG_func(const char *msg) {
 		LOG(msg);
 }
 
-static const char short_options[] = "i:d:N:90:Sl:L:F:I:1:RzM:T:W:O:o:t:rk:g:upwx3yc:C:Y:Q:A:s:U:P:B:46eZ:Ef:a:X:vqH:G:2:KJ:D:jbhVn:m:";
+static const char short_options[] = "i:d:N:90:Sl:L:F:I:1:RzM:T:W:O:o:t:rk:g:upwx3yc:C:Y:Q:A:s:U:P:B:467:eZ:Ef:a:X:vqH:G:2:KJ:D:jbhVn:m:";
 
 // Unused short options: 578
 static const struct option long_options[] = {
@@ -116,6 +119,7 @@ static const struct option long_options[] = {
 	{ "caid",				required_argument, NULL, 'C' },
 	{ "const-cw",			required_argument, NULL, 'Y' },
 	{ "biss-key",			required_argument, NULL, 'Q' },
+	{ "vm-key",			    required_argument, NULL, '7' },
 
 	{ "camd-proto",			required_argument, NULL, 'A' },
 	{ "camd-server",		required_argument, NULL, 's' },
@@ -455,6 +459,18 @@ static void parse_options(struct ts *ts, int argc, char **argv) {
 				camd_set_cw(ts, ts->camd.key->cw, 0);
 				ts->camd.key->is_valid_cw = 1;
 				break;
+			case '7': // --vm-key
+                if (strlen(optarg) != 32) {
+                    fprintf(stderr, "ERROR: Verimatrix key should be %u characters long.\n", 32);
+                    exit(EXIT_FAILURE);
+                }
+                uint8_t dec_key[16];
+                if (decode_hex_string(optarg, dec_key, strlen(optarg)) < 0) {
+                    fprintf(stderr, "ERROR: Invalid hex string for Verimatrix key: %s\n", optarg);
+                    exit(EXIT_FAILURE);
+                }
+                AES_set_decrypt_key(dec_key, 128, &aes_key);
+                break;
 			case 'Q': // --biss-key
 				ts->camd.constant_codeword = 1;
 				if (strlen(optarg) > 2 && optarg[0] == '0' && optarg[1] == 'x')
@@ -792,7 +808,8 @@ static void parse_options(struct ts *ts, int argc, char **argv) {
 				ts_LOGf("Out filter : Pass through TDT/TOT.\n");
 		}
 		ts_LOGf("TS discont : %s\n", ts->ts_discont ? "report" : "ignore");
-		ts->threaded = !(ts->input.type == FILE_IO && ts->input.fd != 0);
+		//ts->threaded = !(ts->input.type == FILE_IO && ts->input.fd != 0);
+		ts->threaded = 0;
 		ts_LOGf("Decoding   : %s\n", ts->threaded ? "threaded" : "single thread");
 	} else {
 		ts_LOGf("Decoding   : disabled\n");

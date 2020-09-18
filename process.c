@@ -26,6 +26,11 @@
 static unsigned long ts_pack;
 static int ts_pack_shown;
 
+extern AES_KEY aes_key;
+AES_KEY aes_key_1;
+AES_KEY aes_key_2;
+int ecm_processed = 0;
+
 char *get_pid_desc(struct ts *ts, uint16_t pid) {
 	int i;
 	uint16_t nitpid = 0x0010, pmtpid = 0xffff, pcrpid = 0xffff;
@@ -101,14 +106,29 @@ static void dump_ts_pack(struct ts *ts, uint16_t pid, uint8_t *ts_packet) {
 
 static void decode_packet(struct ts *ts, uint8_t *ts_packet) {
 	int scramble_idx = ts_packet_get_scrambled(ts_packet);
+    uint8_t *ptr = ts_packet + 4;
+    int ind = 0;
+
+    if (!ecm_processed) {
+        return;
+    }
 	if (scramble_idx > 1) {
-		if (ts->key.is_valid_cw) {
-			csa_decrypt_single_packet(ts->key.csakey, ts_packet);
-		} else {
-			// Can't decrypt the packet just make it NULL packet
-			if (ts->pid_filter)
-				ts_packet_set_pid(ts_packet, 0x1fff);
-		}
+        ind = 0;
+        while (1) {
+            if (ind+16 > 184) {
+                break;
+            }
+            if (scramble_idx == 2) {
+                AES_decrypt(ptr, ptr, &aes_key_2);
+            } else if (scramble_idx == 3) {
+                AES_decrypt(ptr, ptr, &aes_key_1);
+            } else {
+                printf("Unknown scramble idx\n");
+                exit(1);
+            }
+            ptr += 16;
+            ind += 16;
+        }
 	}
 }
 
@@ -424,6 +444,30 @@ static void detect_discontinuity(struct ts *ts, uint8_t *ts_packet) {
 	pidmap_set_val(&ts->cc, pid, cur_cc);
 }
 
+static void process_vm_ecm(struct ts *ts, uint16_t pid, uint8_t *ts_packet)
+{
+    int i;
+    uint8_t ecm[64];
+
+    if (!ts->ecm_pid || pid != ts->ecm_pid) return;
+    for (i = 0 ; i < 4 ; i++) {
+        AES_decrypt(ts_packet+29+(i*16), ecm+i*16, &aes_key);
+    }
+    if (ecm[0] != 0x43) {
+        printf("Error decrypting ECM!\n");
+        exit(1);
+    }
+
+    if (ts_packet[5] == 0x81) {
+        AES_set_decrypt_key(&ecm[9], 128, &aes_key_1);
+        AES_set_decrypt_key(&ecm[25], 128, &aes_key_2);
+    } else {
+        AES_set_decrypt_key(&ecm[9], 128, &aes_key_2);
+        AES_set_decrypt_key(&ecm[25], 128, &aes_key_1);
+    }
+    ecm_processed = 1;
+}
+
 void process_packets(struct ts *ts, uint8_t *data, ssize_t data_len) {
 	ssize_t i;
 	int64_t now = get_time();
@@ -443,7 +487,8 @@ void process_packets(struct ts *ts, uint8_t *data, ssize_t data_len) {
 		process_pmt(ts, pid, ts_packet);
 		process_sdt(ts, pid, ts_packet);
 		process_emm(ts, pid, ts_packet);
-		process_ecm(ts, pid, ts_packet);
+		//process_ecm(ts, pid, ts_packet);
+        process_vm_ecm(ts, pid, ts_packet);
 
 		detect_discontinuity(ts, ts_packet);
 
